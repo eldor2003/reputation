@@ -1,0 +1,136 @@
+name: reputation
+
+x-app-environment: &app-environment
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_DATABASE: ${DB_DATABASE:-reputation}
+  DB_USERNAME: ${DB_USERNAME:-reputation}
+  DB_PASSWORD: ${DB_PASSWORD:-secret}
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: runtime
+    container_name: reputation-app
+    restart: unless-stopped
+    environment:
+      <<: *app-environment
+      SERVICE_MODE: fpm
+    volumes:
+      - .:/var/www/html
+      - vendor:/var/www/html/vendor
+    networks:
+      - reputation
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: reputation-nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_PORT:-8080}:80"
+    volumes:
+      - .:/var/www/html:ro
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - reputation
+    depends_on:
+      - app
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: reputation-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-reputation}
+      POSTGRES_USER: ${DB_USERNAME:-reputation}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - reputation
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-reputation} -d ${DB_DATABASE:-reputation}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: reputation-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - reputation
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  horizon:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: runtime
+    container_name: reputation-horizon
+    restart: unless-stopped
+    environment:
+      <<: *app-environment
+      SERVICE_MODE: horizon
+    volumes:
+      - .:/var/www/html
+      - vendor:/var/www/html/vendor
+    networks:
+      - reputation
+    depends_on:
+      app:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: runtime
+    container_name: reputation-scheduler
+    restart: unless-stopped
+    environment:
+      <<: *app-environment
+      SERVICE_MODE: scheduler
+    volumes:
+      - .:/var/www/html
+      - vendor:/var/www/html/vendor
+    networks:
+      - reputation
+    depends_on:
+      app:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+networks:
+  reputation:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  vendor:
