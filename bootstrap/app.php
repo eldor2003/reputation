@@ -62,5 +62,33 @@ return Application::configure(basePath: dirname(__DIR__))
             ->timezone($timezone)
             ->withoutOverlapping()
             ->onOneServer();
+
+        $mentionlyticsInterval = max(1, (int) config('mentionlytics.polling.interval_minutes'));
+
+        $mentionlyticsSchedule = $schedule->command('mentionlytics:poll')
+            ->timezone($timezone)
+            ->withoutOverlapping()
+            ->onOneServer();
+
+        if ($mentionlyticsInterval < 60) {
+            $mentionlyticsSchedule->cron(sprintf('*/%d * * * *', $mentionlyticsInterval));
+        } else {
+            $mentionlyticsHours = max(1, (int) round($mentionlyticsInterval / 60));
+            $mentionlyticsSchedule->cron(sprintf('0 */%d * * *', $mentionlyticsHours));
+        }
+
+        $serpInterval = max(1, (int) config('serpapi.snapshots.interval_minutes'));
+
+        $serpSchedule = $schedule->command('serp:snapshot')
+            ->timezone($timezone)
+            ->withoutOverlapping()
+            ->onOneServer();
+
+        if ($serpInterval < 60) {
+            $serpSchedule->cron(sprintf('*/%d * * * *', $serpInterval));
+        } else {
+            $serpHours = max(1, (int) round($serpInterval / 60));
+            $serpSchedule->cron(sprintf('0 */%d * * *', $serpHours));
+        }
     })
     ->create();

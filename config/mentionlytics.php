@@ -42,6 +42,7 @@ return [
     'polling' => [
         'default_per_page' => (int) env('MENTIONLYTICS_POLL_PER_PAGE', 20),
         'default_lookback_days' => (int) env('MENTIONLYTICS_POLL_LOOKBACK_DAYS', 7),
+        'interval_minutes' => (int) env('MENTIONLYTICS_POLL_INTERVAL_MINUTES', 15),
     ],
 
 ];

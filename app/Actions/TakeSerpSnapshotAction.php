@@ -12,8 +12,8 @@ class TakeSerpSnapshotAction
         private readonly SerpSnapshotService $snapshotService,
     ) {}
 
-    public function execute(SerpSearchRequestDTO $request): SerpSnapshot
+    public function execute(SerpSearchRequestDTO $request, ?int $personId = null): SerpSnapshot
     {
-        return $this->snapshotService->takeSnapshot($request);
+        return $this->snapshotService->takeSnapshot($request, $personId);
     }
 }

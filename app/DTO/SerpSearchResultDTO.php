@@ -16,5 +16,6 @@ readonly class SerpSearchResultDTO
         public float $responseTimeMs,
         public array $positions,
         public ?string $rawHtmlUrl = null,
+        public ?string $screenshotUrl = null,
     ) {}
 }

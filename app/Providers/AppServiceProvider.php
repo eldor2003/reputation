@@ -22,6 +22,7 @@ use App\Contracts\MentionlyticsRefreshServiceInterface;
 use App\Contracts\MentionlyticsResponseCacheInterface;
 use App\Contracts\MentionlyticsTokenStorageInterface;
 use App\Contracts\SerpApiClientInterface;
+use App\Contracts\SerpScreenshotCaptureInterface;
 use App\Contracts\SerpScreenshotStorageInterface;
 use App\Contracts\SerpSnapshotRepositoryInterface;
 use App\Contracts\MentionRouteStorageInterface;
@@ -63,6 +64,8 @@ use App\Repositories\RoutingRuleRepository;
 use App\Repositories\ThreatRuleRepository;
 use App\Services\Brand24ApiClient;
 use App\Services\LocalSerpScreenshotStorage;
+use App\Services\S3SerpScreenshotStorage;
+use App\Services\SerpApiScreenshotCapture;
 use App\Services\MentionlyticsApiClient;
 use App\Services\Mentionlytics\MentionlyticsAuthService;
 use App\Services\Mentionlytics\DatabaseMentionlyticsTokenStorage;
@@ -151,7 +154,15 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(PersonRepositoryInterface::class, PersonRepository::class);
         $this->app->bind(PersonResolverInterface::class, PersonResolver::class);
         $this->app->bind(SerpSnapshotRepositoryInterface::class, SerpSnapshotRepository::class);
-        $this->app->bind(SerpScreenshotStorageInterface::class, LocalSerpScreenshotStorage::class);
+        $this->app->bind(SerpScreenshotCaptureInterface::class, SerpApiScreenshotCapture::class);
+        $this->app->bind(SerpScreenshotStorageInterface::class, function ($app): SerpScreenshotStorageInterface {
+            $disk = (string) config('serpapi.screenshots.disk', 'local');
+
+            return match ($disk) {
+                's3' => $app->make(S3SerpScreenshotStorage::class),
+                default => $app->make(LocalSerpScreenshotStorage::class),
+            };
+        });
         $this->app->bind(ClaudeClientInterface::class, AnthropicClaudeClient::class);
         $this->app->bind(ClaudeStructuredOutputInterface::class, function ($app): ClaudeStructuredOutputInterface {
             return $app->make(config('classification.structured_output.service'));

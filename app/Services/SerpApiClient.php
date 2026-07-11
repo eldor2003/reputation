@@ -152,6 +152,7 @@ class SerpApiClient implements SerpApiClientInterface
 
         $serpApiSearchId = (string) ($metadata['id'] ?? '');
         $rawHtmlUrl = isset($metadata['raw_html_file']) ? (string) $metadata['raw_html_file'] : null;
+        $screenshotUrl = isset($metadata['screenshot']) ? (string) $metadata['screenshot'] : null;
 
         if ($serpApiSearchId === '') {
             throw new SerpApiException('SerpApi search response is missing search ID.');
@@ -172,6 +173,7 @@ class SerpApiClient implements SerpApiClientInterface
             responseTimeMs: $responseTimeMs,
             positions: $positions,
             rawHtmlUrl: $rawHtmlUrl,
+            screenshotUrl: $screenshotUrl !== '' ? $screenshotUrl : null,
         );
     }
 

@@ -4,6 +4,8 @@ namespace Tests\Feature\Serp;
 
 use App\Actions\TakeSerpSnapshotAction;
 use App\Contracts\SerpApiClientInterface;
+use App\Contracts\SerpScreenshotCaptureInterface;
+use App\Contracts\SerpScreenshotStorageInterface;
 use App\DTO\SerpPositionDTO;
 use App\DTO\SerpSearchRequestDTO;
 use App\DTO\SerpSearchResultDTO;
@@ -37,9 +39,20 @@ class TakeSerpSnapshotActionTest extends TestCase
                     new SerpPositionDTO(1, 'Title 1', 'https://example.com/1', 'Snippet 1'),
                     new SerpPositionDTO(2, 'Title 2', 'https://example.com/2', null),
                 ],
+                rawHtmlUrl: 'https://serpapi.com/raw.html',
             ));
 
         $this->app->instance(SerpApiClientInterface::class, $client);
+
+        $screenshotCapture = $this->createMock(SerpScreenshotCaptureInterface::class);
+        $screenshotCapture->method('capture')->willReturn('png-bytes');
+        $this->app->instance(SerpScreenshotCaptureInterface::class, $screenshotCapture);
+
+        $screenshotStorage = $this->createMock(SerpScreenshotStorageInterface::class);
+        $screenshotStorage->expects($this->once())
+            ->method('store')
+            ->willReturn('serp-screenshots/test.png');
+        $this->app->instance(SerpScreenshotStorageInterface::class, $screenshotStorage);
 
         $snapshot = $this->app->make(TakeSerpSnapshotAction::class)->execute(
             new SerpSearchRequestDTO('brand reputation', SerpEngine::Google),
@@ -51,6 +64,7 @@ class TakeSerpSnapshotActionTest extends TestCase
         $this->assertSame('brand reputation', $snapshot->query);
         $this->assertSame(SerpEngine::Google, $snapshot->search_engine);
         $this->assertSame('search-999', $snapshot->serpapi_search_id);
+        $this->assertSame('serp-screenshots/test.png', $snapshot->screenshot_path);
 
         $firstResult = SerpResult::query()->where('position', 1)->first();
         $this->assertNotNull($firstResult);
