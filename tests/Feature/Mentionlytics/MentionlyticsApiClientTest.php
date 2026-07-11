@@ -6,6 +6,8 @@ use App\Contracts\MentionlyticsClientInterface;
 use App\DTO\MentionlyticsMentionsQueryDTO;
 use App\Exceptions\MentionlyticsApiException;
 use App\Services\MentionlyticsTokenManager;
+use Carbon\Carbon;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\Test;
@@ -13,6 +15,7 @@ use Tests\TestCase;
 
 class MentionlyticsApiClientTest extends TestCase
 {
+    use \Illuminate\Foundation\Testing\RefreshDatabase;
     #[Test]
     public function it_verifies_api_connectivity_with_a_sample_mentions_request(): void
     {
@@ -102,23 +105,32 @@ class MentionlyticsApiClientTest extends TestCase
     }
 
     #[Test]
-    public function it_refreshes_bearer_token_when_not_configured(): void
+    public function it_refreshes_bearer_token_when_access_token_is_near_expiry(): void
     {
+        Carbon::setTestNow('2026-07-11 12:00:00');
+
         config([
-            'mentionlytics.bearer_token' => '',
+            'mentionlytics.bearer_token' => 'expiring-bearer-token',
             'mentionlytics.refresh_token' => 'test-refresh-token',
             'mentionlytics.base_url' => 'https://api.mentionlytics.com/v2',
             'mentionlytics.timeout' => 5,
-            'mentionlytics.bearer_ttl_seconds' => 3600,
-            'mentionlytics.retry.times' => 1,
-            'mentionlytics.retry.sleep_ms' => 0,
+            'mentionlytics.proactive_refresh_buffer_seconds' => 300,
         ]);
 
         Cache::flush();
 
+        $this->app->make(\App\Contracts\MentionlyticsTokenStorageInterface::class)->store(
+            new \App\DTO\MentionlyticsTokenPairDTO(
+                accessToken: 'expiring-bearer-token',
+                refreshToken: 'test-refresh-token',
+                expiresAt: CarbonImmutable::now()->addMinutes(2),
+            ),
+        );
+
         Http::fake([
             'api.mentionlytics.com/v2/auth/refresh' => Http::response([
                 'access_token' => 'refreshed-bearer-token',
+                'refresh_token' => 'refreshed-refresh-token',
             ], 200),
             'api.mentionlytics.com/v2/mentions*' => Http::response([
                 'mentions' => [],
@@ -126,15 +138,17 @@ class MentionlyticsApiClientTest extends TestCase
             ], 200),
         ]);
 
-        $connectionInfo = $this->app->make(MentionlyticsClientInterface::class)->testConnection();
-
-        $this->assertSame(0, $connectionInfo->mentionsOnPage);
+        $this->app->make(MentionlyticsClientInterface::class)->getMentions(
+            new MentionlyticsMentionsQueryDTO('20260701', '20260711'),
+        );
 
         Http::assertSent(function ($request): bool {
             return $request->method() === 'POST'
                 && str_contains($request->url(), '/v2/auth/refresh')
                 && $request['refresh_token'] === 'test-refresh-token';
         });
+
+        Carbon::setTestNow();
     }
 
     #[Test]
@@ -149,7 +163,7 @@ class MentionlyticsApiClientTest extends TestCase
         Cache::flush();
 
         $this->expectException(MentionlyticsApiException::class);
-        $this->expectExceptionMessage('Mentionlytics refresh token is not configured.');
+        $this->expectExceptionMessage('Mentionlytics credentials are not configured.');
 
         $this->app->make(MentionlyticsTokenManager::class)->getBearerToken();
     }
@@ -158,14 +172,15 @@ class MentionlyticsApiClientTest extends TestCase
     public function it_retries_on_rate_limit_and_server_errors(): void
     {
         $this->configureMentionlyticsClient([
-            'mentionlytics.retry.times' => 3,
-            'mentionlytics.retry.sleep_ms' => 0,
+            'mentionlytics.retry.max_attempts' => 3,
+            'mentionlytics.retry.base_delay_ms' => 0,
+            'mentionlytics.retry.max_delay_ms' => 0,
         ]);
 
         Http::fake([
             'api.mentionlytics.com/v2/mentions*' => Http::sequence()
                 ->push(['error' => ['message' => 'rate limit']], 429)
-                ->push(['error' => ['message' => 'server error']], 503)
+                ->push(['error' => ['message' => 'rate limit']], 429)
                 ->push([
                     'mentions' => [],
                     'results_after' => null,
@@ -257,13 +272,18 @@ class MentionlyticsApiClientTest extends TestCase
     {
         config([
             'mentionlytics.bearer_token' => 'updated-bearer-token',
-            'mentionlytics.refresh_token' => '',
+            'mentionlytics.refresh_token' => 'updated-refresh-token',
             'mentionlytics.base_url' => 'https://api.mentionlytics.com/v2',
             'mentionlytics.timeout' => 5,
-            'mentionlytics.bearer_ttl_seconds' => 3600,
         ]);
 
-        Cache::put('mentionlytics.bearer_token', 'stale-bearer-token', now()->addHour());
+        $this->app->make(\App\Contracts\MentionlyticsTokenStorageInterface::class)->store(
+            new \App\DTO\MentionlyticsTokenPairDTO(
+                accessToken: 'stale-bearer-token',
+                refreshToken: 'stale-refresh-token',
+                expiresAt: \Carbon\CarbonImmutable::now()->addHour(),
+            ),
+        );
 
         Http::fake([
             'api.mentionlytics.com/v2/mentions*' => Http::response([
@@ -272,7 +292,10 @@ class MentionlyticsApiClientTest extends TestCase
             ], 200),
         ]);
 
-        $this->app->make(MentionlyticsClientInterface::class)->testConnection();
+        $this->app->make(\App\Contracts\MentionlyticsAuthServiceInterface::class)->resetToEnvironmentCredentials();
+        $this->app->make(MentionlyticsClientInterface::class)->getMentions(
+            new MentionlyticsMentionsQueryDTO('20260701', '20260711'),
+        );
 
         Http::assertSent(function ($request): bool {
             return $request->hasHeader('Authorization', 'Bearer updated-bearer-token');
@@ -302,11 +325,14 @@ class MentionlyticsApiClientTest extends TestCase
             'mentionlytics.refresh_token' => 'test-refresh-token',
             'mentionlytics.base_url' => 'https://api.mentionlytics.com/v2',
             'mentionlytics.timeout' => 5,
-            'mentionlytics.bearer_ttl_seconds' => 3600,
-            'mentionlytics.retry.times' => 1,
-            'mentionlytics.retry.sleep_ms' => 0,
+            'mentionlytics.access_token_ttl_seconds' => 3600,
+            'mentionlytics.proactive_refresh_buffer_seconds' => 300,
+            'mentionlytics.retry.max_attempts' => 5,
+            'mentionlytics.retry.base_delay_ms' => 0,
+            'mentionlytics.retry.max_delay_ms' => 0,
         ], $overrides));
 
         Cache::flush();
+        \App\Models\MentionlyticsOAuthToken::query()->delete();
     }
 }

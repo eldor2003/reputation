@@ -14,6 +14,7 @@ use App\Models\MentionRoute;
 use App\Models\Project;
 use App\Models\Source;
 use App\Models\TelegramNotification;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -29,7 +30,10 @@ class MentionlyticsPipelineTest extends TestCase
 
     public function test_it_processes_mentionlytics_mention_through_the_full_pipeline(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-07-10 14:00:00', 'UTC'));
+
         config([
+            'app.timezone' => 'UTC',
             'ingest.api_token' => 'test-ingest-token',
             'telegram.bot_token' => 'test-bot-token',
             'telegram.chat_id' => '-100123456',
@@ -127,5 +131,7 @@ class MentionlyticsPipelineTest extends TestCase
         $this->assertNotNull($notification);
         $this->assertSame(TelegramNotificationStatus::Sent, $notification->status);
         $this->assertSame('88', $notification->message_id);
+
+        Carbon::setTestNow();
     }
 }

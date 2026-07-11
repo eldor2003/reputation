@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Contracts\MentionlyticsAuthServiceInterface;
 use App\Contracts\MentionlyticsClientInterface;
 use App\DTO\MentionlyticsConnectionInfoDTO;
 use App\DTO\MentionlyticsMentionDTO;
@@ -9,18 +10,14 @@ use App\DTO\MentionlyticsMentionsPageDTO;
 use App\DTO\MentionlyticsMentionsQueryDTO;
 use App\DTO\MentionlyticsVerificationResultDTO;
 use App\Exceptions\MentionlyticsApiException;
-use App\Support\LogSanitizer;
+use App\Services\Mentionlytics\MentionlyticsHttpTransport;
 use Carbon\Carbon;
-use Illuminate\Http\Client\PendingRequest;
-use Illuminate\Http\Client\RequestException;
-use Illuminate\Http\Client\Response;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 
 class MentionlyticsApiClient implements MentionlyticsClientInterface
 {
     public function __construct(
-        private readonly MentionlyticsTokenManager $tokenManager,
+        private readonly MentionlyticsAuthServiceInterface $authService,
+        private readonly MentionlyticsHttpTransport $transport,
     ) {}
 
     public function testConnection(): MentionlyticsConnectionInfoDTO
@@ -35,8 +32,6 @@ class MentionlyticsApiClient implements MentionlyticsClientInterface
 
     public function verify(): MentionlyticsVerificationResultDTO
     {
-        $this->tokenManager->invalidateCachedBearerToken();
-
         $lookbackDays = (int) config('mentionlytics.polling.default_lookback_days');
         $perPage = (int) config('mentionlytics.polling.default_per_page');
         $startDate = Carbon::now()->subDays($lookbackDays)->format('Ymd');
@@ -49,7 +44,7 @@ class MentionlyticsApiClient implements MentionlyticsClientInterface
         );
 
         $firstPage = $this->getMentions($query);
-        $tokenRefreshUsed = $this->tokenManager->wasRefreshUsedOnLastOperation();
+        $tokenRefreshUsed = $this->authService->wasRefreshUsedOnLastOperation();
         $paginationVerified = false;
 
         if ($firstPage->hasMore && $firstPage->resultsAfter !== null) {
@@ -61,7 +56,7 @@ class MentionlyticsApiClient implements MentionlyticsClientInterface
             ));
 
             $paginationVerified = true;
-            $tokenRefreshUsed = $tokenRefreshUsed || $this->tokenManager->wasRefreshUsedOnLastOperation();
+            $tokenRefreshUsed = $tokenRefreshUsed || $this->authService->wasRefreshUsedOnLastOperation();
         }
 
         [$lastMentionTimestamp, $lastMentionId] = $this->resolveLatestMention($firstPage->mentions);
@@ -135,7 +130,7 @@ class MentionlyticsApiClient implements MentionlyticsClientInterface
             $queryParameters['language'] = $query->language;
         }
 
-        $payload = $this->get('/mentions', $queryParameters);
+        $payload = $this->transport->get('/mentions', $queryParameters);
 
         /** @var list<array<string, mixed>> $rows */
         $rows = $this->extractMentionRows($payload);
@@ -157,119 +152,6 @@ class MentionlyticsApiClient implements MentionlyticsClientInterface
             hasMore: $resultsAfterString !== null && $resultsAfterString !== '',
             resultsAfter: $resultsAfterString,
         );
-    }
-
-    /**
-     * @param  array<string, mixed>  $query
-     * @return array<string, mixed>
-     */
-    private function get(string $path, array $query = []): array
-    {
-        try {
-            $response = $this->http()
-                ->get($path, $query)
-                ->throw();
-
-            return $this->parsePayload($response);
-        } catch (RequestException $exception) {
-            if ($exception->response?->status() === 401) {
-                $this->tokenManager->invalidateCachedBearerToken();
-
-                try {
-                    $response = $this->http(forceRefresh: true)
-                        ->get($path, $query)
-                        ->throw();
-
-                    return $this->parsePayload($response);
-                } catch (RequestException $retryException) {
-                    $exception = $retryException;
-                }
-            }
-
-            Log::error('Mentionlytics API request failed.', [
-                'path' => $path,
-                'query' => $query,
-                'status' => $exception->response?->status(),
-                'body' => $exception->response?->json(),
-                'exception' => LogSanitizer::redactSecrets($exception->getMessage()),
-            ]);
-
-            throw new MentionlyticsApiException(
-                $this->resolveRequestFailureMessage($exception),
-                $exception,
-            );
-        }
-    }
-
-    private function resolveRequestFailureMessage(RequestException $exception): string
-    {
-        $status = $exception->response?->status();
-        /** @var array<string, mixed>|null $body */
-        $body = $exception->response?->json();
-
-        if (is_array($body)) {
-            if (is_string($body['message'] ?? null) && $body['message'] !== '') {
-                return 'Mentionlytics API request failed: '.$body['message'];
-            }
-
-            if (is_array($body['error'] ?? null) && is_string($body['error']['message'] ?? null)) {
-                return 'Mentionlytics API request failed: '.$body['error']['message'];
-            }
-        }
-
-        if ($status === 401) {
-            return 'Mentionlytics API authentication failed. Verify the configured token and refresh token settings.';
-        }
-
-        return 'Mentionlytics API request failed.';
-    }
-
-    private function http(bool $forceRefresh = false): PendingRequest
-    {
-        $bearerToken = $forceRefresh
-            ? $this->tokenManager->getBearerToken(forceRefresh: true)
-            : $this->tokenManager->getBearerToken();
-
-        return Http::baseUrl(rtrim((string) config('mentionlytics.base_url'), '/'))
-            ->timeout((int) config('mentionlytics.timeout'))
-            ->acceptJson()
-            ->withToken($bearerToken)
-            ->retry(
-                (int) config('mentionlytics.retry.times'),
-                (int) config('mentionlytics.retry.sleep_ms'),
-                fn (?\Exception $exception): bool => $this->shouldRetry($exception),
-            );
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function parsePayload(Response $response): array
-    {
-        /** @var array<string, mixed>|null $payload */
-        $payload = $response->json();
-
-        if (! is_array($payload)) {
-            throw new MentionlyticsApiException('Mentionlytics API returned an invalid JSON payload.');
-        }
-
-        if (isset($payload['error']) && is_array($payload['error'])) {
-            $message = is_string($payload['error']['message'] ?? null)
-                ? $payload['error']['message']
-                : 'Mentionlytics API returned an error response.';
-
-            throw new MentionlyticsApiException($message);
-        }
-
-        if (isset($payload['error']) && is_string($payload['error']) && $payload['error'] !== '') {
-            $message = is_string($payload['message'] ?? null) && $payload['message'] !== ''
-                ? $payload['message']
-                : $payload['error'];
-
-            throw new MentionlyticsApiException($message);
-        }
-
-        return $payload;
     }
 
     /**
@@ -362,46 +244,6 @@ class MentionlyticsApiClient implements MentionlyticsClientInterface
         }
 
         return null;
-    }
-
-    private function shouldRetry(?\Exception $exception): bool
-    {
-        if (! $exception instanceof RequestException) {
-            return true;
-        }
-
-        $status = $exception->response?->status();
-
-        if ($status === null) {
-            return true;
-        }
-
-        if ($status === 401) {
-            return false;
-        }
-
-        if ($status === 520 && $this->responseIndicatesInvalidToken($exception)) {
-            return false;
-        }
-
-        return $status === 429 || $status >= 500;
-    }
-
-    private function responseIndicatesInvalidToken(RequestException $exception): bool
-    {
-        /** @var array<string, mixed>|null $body */
-        $body = $exception->response?->json();
-
-        if (! is_array($body)) {
-            return false;
-        }
-
-        $message = strtolower((string) ($body['message'] ?? ''));
-        $error = strtolower((string) ($body['error'] ?? ''));
-
-        return str_contains($message, 'invalid token')
-            || str_contains($error, 'invalid_token')
-            || str_contains($error, 'invalid token');
     }
 
     /**

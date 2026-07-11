@@ -35,7 +35,7 @@ return [
             'label' => 'Утренний дайджест',
         ],
         'evening' => [
-            'hour' => (int) env('DELIVERY_DIGEST_EVENING_HOUR', 18),
+            'hour' => (int) env('DELIVERY_DIGEST_EVENING_HOUR', 20),
             'minute' => (int) env('DELIVERY_DIGEST_EVENING_MINUTE', 0),
             'label' => 'Вечерний дайджест',
         ],

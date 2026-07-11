@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -38,4 +39,28 @@ return Application::configure(basePath: dirname(__DIR__))
                 ], 500);
             }
         });
-    })->create();
+    })
+    ->withSchedule(function (Schedule $schedule): void {
+        $timezone = (string) config('routing.timezone');
+
+        $schedule->command('delivery:generate-digest morning')
+            ->dailyAt(sprintf(
+                '%02d:%02d',
+                (int) config('delivery.digest.morning.hour'),
+                (int) config('delivery.digest.morning.minute'),
+            ))
+            ->timezone($timezone)
+            ->withoutOverlapping()
+            ->onOneServer();
+
+        $schedule->command('delivery:generate-digest evening')
+            ->dailyAt(sprintf(
+                '%02d:%02d',
+                (int) config('delivery.digest.evening.hour'),
+                (int) config('delivery.digest.evening.minute'),
+            ))
+            ->timezone($timezone)
+            ->withoutOverlapping()
+            ->onOneServer();
+    })
+    ->create();

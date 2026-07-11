@@ -29,7 +29,7 @@ use Illuminate\Support\Str;
 
 class MentionlyticsTestCommand extends Command
 {
-    protected $signature = 'mentionlytics:test {--pipeline : Run one real mention through the full pipeline}';
+    protected $signature = 'mentionlytics:test {--pipeline : Run one real mention through the full pipeline} {--reseed-from-env : Replace stored tokens with .env credentials}';
 
     protected $description = 'Verify Mentionlytics API connectivity and optionally run a live pipeline check';
 
@@ -39,12 +39,17 @@ class MentionlyticsTestCommand extends Command
     public function handle(
         MentionlyticsClientInterface $client,
         IngestMentionlyticsMentionAction $ingestAction,
+        \App\Contracts\MentionlyticsAuthServiceInterface $authService,
     ): int {
         if (! $this->credentialsConfigured()) {
             $this->components->error('API Connection Status: FAILED');
             $this->line('Configure MENTIONLYTICS_BEARER_TOKEN or MENTIONLYTICS_REFRESH_TOKEN in .env.');
 
             return self::FAILURE;
+        }
+
+        if ($this->option('reseed-from-env')) {
+            $authService->resetToEnvironmentCredentials();
         }
 
         try {
