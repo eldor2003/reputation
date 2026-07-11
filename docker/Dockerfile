@@ -27,13 +27,18 @@ RUN apk add --no-cache \
         libzip-dev \
         postgresql-dev \
         linux-headers \
+        freetype-dev \
+        libjpeg-turbo-dev \
+        libpng-dev \
         bash \
         git \
         unzip \
         $PHPIZE_DEPS \
     && docker-php-ext-configure intl \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install \
         bcmath \
+        gd \
         intl \
         opcache \
         pcntl \
