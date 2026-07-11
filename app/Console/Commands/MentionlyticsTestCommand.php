@@ -19,7 +19,6 @@ use App\Jobs\ProcessMentionJob;
 use App\Models\AiResult;
 use App\Models\Mention;
 use App\Models\MentionRoute;
-use App\Models\Project;
 use App\Models\Source;
 use App\Models\TelegramNotification;
 use App\Support\MentionlyticsApiMentionMapper;
@@ -29,7 +28,10 @@ use Illuminate\Support\Str;
 
 class MentionlyticsTestCommand extends Command
 {
-    protected $signature = 'mentionlytics:test {--pipeline : Run one real mention through the full pipeline} {--reseed-from-env : Replace stored tokens with .env credentials}';
+    protected $signature = 'mentionlytics:test
+        {--pipeline : Run one real mention through the full pipeline}
+        {--reseed-from-env : Replace stored tokens with .env credentials}
+        {--source= : Mentionlytics source ID or UUID (required with --pipeline)}';
 
     protected $description = 'Verify Mentionlytics API connectivity and optionally run a live pipeline check';
 
@@ -140,7 +142,7 @@ class MentionlyticsTestCommand extends Command
         MentionlyticsClientInterface $client,
         IngestMentionlyticsMentionAction $ingestAction,
     ): int {
-        $lookbackDays = (int) config('mentionlytics.polling.default_lookback_days');
+        $lookbackDays = (int) config('mentionlytics.polling.bootstrap_lookback_days');
         $perPage = (int) config('mentionlytics.polling.default_per_page');
 
         $page = $client->getMentions(new MentionlyticsMentionsQueryDTO(
@@ -156,7 +158,12 @@ class MentionlyticsTestCommand extends Command
         }
 
         $mention = $this->selectMentionForPipeline($page->mentions);
-        $source = $this->resolveMentionlyticsSource();
+        $source = $this->resolveSourceOption();
+
+        if ($source === null) {
+            return $this->failMissingSourceOption();
+        }
+
         $externalId = 'ml-e2e-'.now()->format('YmdHis').'-'.Str::lower(Str::random(6));
         $payload = MentionlyticsApiMentionMapper::toIngestPayload($mention, $source->uuid);
         $payload['mention_id'] = $externalId;
@@ -209,26 +216,71 @@ class MentionlyticsTestCommand extends Command
         return $mentions[0];
     }
 
-    private function resolveMentionlyticsSource(): Source
+    private function resolveSourceOption(): ?Source
     {
-        $project = Project::query()->firstOrCreate(
-            ['slug' => 'mentionlytics-local'],
-            [
-                'name' => 'Mentionlytics Local',
-                'is_active' => true,
-            ],
-        );
+        $sourceOption = $this->option('source');
 
-        return Source::query()->firstOrCreate(
-            [
-                'project_id' => $project->id,
-                'type' => SourceType::Mentionlytics,
-                'external_id' => 'mentionlytics-default',
-            ],
-            [
-                'name' => 'Mentionlytics Default Source',
-                'is_active' => true,
-            ],
+        if (! is_string($sourceOption) || trim($sourceOption) === '') {
+            return null;
+        }
+
+        $sourceOption = trim($sourceOption);
+
+        $query = Source::query()->where('type', SourceType::Mentionlytics);
+
+        if (Str::isUuid($sourceOption)) {
+            return $query->where('uuid', $sourceOption)->first();
+        }
+
+        if (ctype_digit($sourceOption)) {
+            return $query->whereKey((int) $sourceOption)->first();
+        }
+
+        return null;
+    }
+
+    private function failMissingSourceOption(): int
+    {
+        $sourceOption = $this->option('source');
+
+        if (is_string($sourceOption) && trim($sourceOption) !== '') {
+            $this->components->error(sprintf(
+                'Mentionlytics source not found: %s',
+                trim($sourceOption),
+            ));
+        } else {
+            $this->components->error('A Mentionlytics source is required for pipeline verification.');
+            $this->line('Provide an existing source with --source=<id> or --source=<uuid>.');
+        }
+
+        $this->newLine();
+        $this->renderAvailableMentionlyticsSources();
+
+        return self::FAILURE;
+    }
+
+    private function renderAvailableMentionlyticsSources(): void
+    {
+        $sources = Source::query()
+            ->where('type', SourceType::Mentionlytics)
+            ->orderBy('id')
+            ->get(['id', 'uuid', 'name', 'is_active']);
+
+        if ($sources->isEmpty()) {
+            $this->warn('No Mentionlytics sources are configured.');
+
+            return;
+        }
+
+        $this->components->info('Available Mentionlytics sources:');
+        $this->table(
+            ['ID', 'UUID', 'Name', 'Active'],
+            $sources->map(fn (Source $source): array => [
+                (string) $source->id,
+                $source->uuid,
+                $source->name,
+                $source->is_active ? 'yes' : 'no',
+            ])->all(),
         );
     }
 

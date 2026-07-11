@@ -32,7 +32,7 @@ class MentionlyticsApiClient implements MentionlyticsClientInterface
 
     public function verify(): MentionlyticsVerificationResultDTO
     {
-        $lookbackDays = (int) config('mentionlytics.polling.default_lookback_days');
+        $lookbackDays = (int) config('mentionlytics.polling.bootstrap_lookback_days');
         $perPage = (int) config('mentionlytics.polling.default_per_page');
         $startDate = Carbon::now()->subDays($lookbackDays)->format('Ymd');
         $endDate = Carbon::now()->format('Ymd');

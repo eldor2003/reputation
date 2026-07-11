@@ -47,12 +47,15 @@ class MentionlyticsPollCommand extends Command
             $totalSkipped += $result['skipped'];
 
             $this->line(sprintf(
-                'Source #%d (%s): ingested=%d skipped=%d pages=%d',
+                'Source #%d (%s): mode=%s ingested=%d skipped=%d skipped_checkpoint=%d pages=%d%s',
                 $source->id,
                 $source->name,
+                $result['mode'],
                 $result['ingested'],
                 $result['skipped'],
+                $result['skipped_checkpoint'],
                 $result['pages'],
+                $result['checkpoint_established'] ? ' checkpoint_established=1' : '',
             ));
         }
 

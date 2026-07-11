@@ -35,7 +35,7 @@ class MentionlyticsPollCommandTest extends TestCase
         $pollAction->expects($this->once())
             ->method('execute')
             ->with($this->callback(fn (Source $polledSource): bool => $polledSource->is($source)))
-            ->willReturn(['ingested' => 2, 'skipped' => 1, 'pages' => 1]);
+            ->willReturn(['ingested' => 2, 'skipped' => 1, 'skipped_checkpoint' => 0, 'pages' => 1, 'mode' => 'bootstrap', 'checkpoint_established' => false]);
 
         $this->app->instance(PollMentionlyticsMentionsAction::class, $pollAction);
 
