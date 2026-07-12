@@ -5,15 +5,25 @@ namespace App\Services\Delivery;
 use App\Contracts\DeliveryCardBuilderInterface;
 use App\DTO\DeliveryCardDTO;
 use App\DTO\DeliveryContextDTO;
-use Carbon\CarbonInterface;
+use App\Enums\ModerationAction;
+use App\Models\AiResult;
+use App\Models\Mention;
+use App\Models\ModerationLog;
+use App\Models\Project;
+use App\Services\Telegram\TelegramCardMessageLayout;
 
 class DeliveryCardBuilder implements DeliveryCardBuilderInterface
 {
+    public function __construct(
+        private readonly TelegramCardMessageLayout $layout,
+    ) {}
+
     public function build(DeliveryContextDTO $context): DeliveryCardDTO
     {
-        $personName = $context->person?->full_name
-            ?? $context->aiResult->person
-            ?? 'неизвестно';
+        $personName = $this->layout->resolveDisplayPerson(
+            $context->mention,
+            $context->aiResult->person,
+        ) ?? 'неизвестно';
 
         return new DeliveryCardDTO(
             mentionId: $context->mention->id,
@@ -35,50 +45,46 @@ class DeliveryCardBuilder implements DeliveryCardBuilderInterface
 
     public function formatCard(DeliveryCardDTO $card): string
     {
-        $lines = [
-            '————————————',
-            '',
-            '📦 Карточка доставки',
-            '',
-            '👤 Персона:',
-            $card->person,
-            '',
-            '🎯 Уровень угрозы:',
-            $card->threatLevel.' ('.$card->threatScore.')',
-            '',
-            '📡 Источник:',
-            $card->source,
-            '',
-            '📝 Краткое содержание:',
-            '',
-            $card->summary,
-            '',
-            '🔗 URL:',
-            '',
-            $card->url ?? 'не указан',
-            '',
-            '😊 Тональность:',
-            $this->translateSentiment($card->sentiment),
-            '',
-            '⚠ Критичность:',
-            $card->severity.' / 5',
-            '',
-            '🔍 SERP позиция:',
-            $card->serpPosition !== null ? (string) $card->serpPosition : 'н/д',
-            '',
-            '📊 Размер кластера:',
-            (string) $card->clusterSize,
-            '',
-            '🕒 Publication Date:',
-            $this->formatPublicationDate($card->publishedAt),
-            '',
-            '⚙️ Processed At:',
-            $this->formatProcessedAt($card->processedAt),
-            '',
-            '————————————',
-        ];
+        $mention = Mention::query()->with(['source', 'person'])->find($card->mentionId);
+        $aiResult = AiResult::query()
+            ->where('mention_id', $card->mentionId)
+            ->latest('processed_at')
+            ->first();
+        $projectName = Project::query()->find($card->projectId)?->name;
+        $approvedAt = ModerationLog::query()
+            ->where('mention_id', $card->mentionId)
+            ->where('action', ModerationAction::Approve)
+            ->latest('created_at')
+            ->first()
+            ?->created_at;
+        $mentionTime = $mention?->published_at ?? $mention?->received_at ?? $card->publishedAt;
+        $mentionForSource = $mention ?? new Mention([
+            'url' => $card->url,
+            'metadata' => $this->sourceMetadataFromLabel($card->source),
+        ]);
 
-        return implode("\n", $lines);
+        return $this->layout->format(
+            sourceLabel: $this->layout->resolveSourceLabel(
+                mention: $mentionForSource,
+                source: $mention?->source,
+                fallback: $card->source,
+            ),
+            sentiment: $card->sentiment,
+            threatLevel: $card->threatLevel,
+            severity: $card->severity,
+            person: $mention !== null
+                ? $this->layout->resolveDisplayPerson($mention, $aiResult?->person ?? $card->person)
+                : ($this->layout->resolveDisplayPerson(new Mention(['project_id' => $card->projectId]), $card->person) ?? $card->person),
+            category: $aiResult?->category,
+            language: $aiResult?->language,
+            confidence: $aiResult?->confidence !== null ? (int) $aiResult->confidence : null,
+            summary: $card->summary,
+            url: $card->url,
+            occurredAt: $mentionTime,
+            mentionId: $card->mentionId,
+            projectName: $projectName,
+            approvedAt: $approvedAt,
+        );
     }
 
     /**
@@ -87,11 +93,11 @@ class DeliveryCardBuilder implements DeliveryCardBuilderInterface
     public function formatDigest(string $title, array $cards): string
     {
         $sections = [
-            '========================',
-            '',
             '📬 '.$title,
             '',
             'Всего упоминаний: '.count($cards),
+            '',
+            TelegramCardMessageLayout::SEPARATOR,
             '',
         ];
 
@@ -102,39 +108,16 @@ class DeliveryCardBuilder implements DeliveryCardBuilderInterface
             $sections[] = '';
         }
 
-        $sections[] = '========================';
+        $sections[] = TelegramCardMessageLayout::SEPARATOR;
 
         return implode("\n", $sections);
     }
 
-    private function formatPublicationDate(?CarbonInterface $publishedAt): string
+    /**
+     * @return array<string, mixed>
+     */
+    private function sourceMetadataFromLabel(string $source): array
     {
-        if ($publishedAt === null) {
-            return 'Unknown';
-        }
-
-        return $this->formatDateTime($publishedAt);
-    }
-
-    private function formatProcessedAt(CarbonInterface $processedAt): string
-    {
-        return $this->formatDateTime($processedAt);
-    }
-
-    private function formatDateTime(CarbonInterface $dateTime): string
-    {
-        $timezone = (string) config('app.timezone', 'UTC');
-
-        return $dateTime->copy()->timezone($timezone)->format('d.m.Y H:i T');
-    }
-
-    private function translateSentiment(string $sentiment): string
-    {
-        return match ($sentiment) {
-            'negative' => 'негативная',
-            'neutral' => 'нейтральная',
-            'positive' => 'позитивная',
-            default => 'неизвестно',
-        };
+        return ['platform' => $source];
     }
 }

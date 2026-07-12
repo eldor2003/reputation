@@ -8,6 +8,7 @@ use App\DTO\DeduplicationResultDTO;
 use App\DTO\NormalizedMentionDTO;
 use App\Events\MentionClustered;
 use App\Events\MentionDeduplicated;
+use Illuminate\Support\Facades\Cache;
 
 class DeduplicateMentionAction
 {
@@ -17,6 +18,20 @@ class DeduplicateMentionAction
     ) {}
 
     public function execute(int $mentionId, NormalizedMentionDTO $mention): DeduplicationResultDTO
+    {
+        $fingerprint = $this->clusterBuilder->buildFingerprint($mention);
+        $lockKey = sprintf(
+            'dedup:content:%d:%s',
+            $mention->projectId,
+            $fingerprint->contentFingerprint,
+        );
+
+        return Cache::lock($lockKey, 30)->block(10, function () use ($mentionId, $mention): DeduplicationResultDTO {
+            return $this->deduplicateWithinLock($mentionId, $mention);
+        });
+    }
+
+    private function deduplicateWithinLock(int $mentionId, NormalizedMentionDTO $mention): DeduplicationResultDTO
     {
         $result = $this->deduplicationEngine->check($mention);
         $result = $this->clusterBuilder->assign($mentionId, $mention, $result);

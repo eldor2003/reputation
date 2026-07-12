@@ -21,8 +21,9 @@ readonly class SerpSearchRequestDTO
     {
         $parameters = [
             'engine' => $this->engine->serpApiEngine(),
-            'q' => $this->query,
         ];
+
+        $parameters[$this->queryParameterName()] = $this->query;
 
         if ($this->location !== null) {
             $parameters['location'] = $this->location;
@@ -37,5 +38,13 @@ readonly class SerpSearchRequestDTO
         }
 
         return $parameters;
+    }
+
+    private function queryParameterName(): string
+    {
+        return match ($this->engine) {
+            SerpEngine::Yandex => 'text',
+            default => 'q',
+        };
     }
 }

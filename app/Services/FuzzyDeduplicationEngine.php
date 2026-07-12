@@ -42,6 +42,19 @@ class FuzzyDeduplicationEngine implements DeduplicationEngineInterface
         }
 
         $fingerprint = $this->buildFingerprint($mention);
+        $contentDuplicate = $this->findExactContentDuplicate($mention, $fingerprint);
+
+        if ($contentDuplicate !== null) {
+            return new DeduplicationResultDTO(
+                isDuplicate: true,
+                originalMentionId: $contentDuplicate->id,
+                dedupHash: $fingerprint->dedupHash,
+                clusterId: $contentDuplicate->mention_cluster_id,
+                matchMethod: DeduplicationMatchMethod::Exact,
+                fingerprint: $fingerprint,
+            );
+        }
+
         $bestMatch = $this->findBestFuzzyMatch($mention, $fingerprint);
 
         if ($bestMatch === null) {
@@ -124,7 +137,6 @@ class FuzzyDeduplicationEngine implements DeduplicationEngineInterface
         $query = Mention::query()
             ->where('project_id', $mention->projectId)
             ->where('is_duplicate', false)
-            ->where('source_id', '!=', $mention->sourceId)
             ->where(function ($builder) use ($fingerprint): void {
                 $builder->where('content_fingerprint', $fingerprint->contentFingerprint);
 
@@ -166,6 +178,38 @@ class FuzzyDeduplicationEngine implements DeduplicationEngineInterface
             receivedAt: $mention->received_at,
             metadata: $mention->metadata,
         );
+    }
+
+    private function findExactContentDuplicate(
+        NormalizedMentionDTO $mention,
+        MentionFingerprintDTO $fingerprint,
+    ): ?Mention {
+        $existing = Mention::query()
+            ->where('project_id', $mention->projectId)
+            ->where('is_duplicate', false)
+            ->where('content_fingerprint', $fingerprint->contentFingerprint)
+            ->oldest('id')
+            ->first();
+
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        $normalizedContent = $this->normalizeContent($mention->text);
+
+        if ($normalizedContent === '') {
+            return null;
+        }
+
+        return Mention::query()
+            ->where('project_id', $mention->projectId)
+            ->where('is_duplicate', false)
+            ->whereNull('content_fingerprint')
+            ->where('content', '!=', '')
+            ->latest('id')
+            ->limit(500)
+            ->get()
+            ->first(fn (Mention $candidate): bool => $this->normalizeContent((string) $candidate->content) === $normalizedContent);
     }
 
     private function normalizeContent(string $text): string

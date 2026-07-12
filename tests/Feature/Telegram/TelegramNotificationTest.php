@@ -13,6 +13,7 @@ use App\Models\MentionRoute;
 use App\Models\Project;
 use App\Models\Source;
 use App\Models\TelegramNotification;
+use App\Services\Telegram\TelegramCardMessageLayout;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
@@ -65,7 +66,8 @@ class TelegramNotificationTest extends TestCase
             $data = $request->data();
 
             return str_contains($request->url(), 'sendMessage')
-                && str_contains($data['text'] ?? '', '🚨 Оповещение о репутации')
+                && str_contains($data['text'] ?? '', '🌐')
+                && str_contains($data['text'] ?? '', TelegramCardMessageLayout::SEPARATOR)
                 && isset($data['reply_markup']['inline_keyboard'])
                 && $data['reply_markup']['inline_keyboard'][0][0]['text'] === '✅ Одобрить'
                 && $data['reply_markup']['inline_keyboard'][0][1]['text'] === '❌ Отклонить'
@@ -96,6 +98,86 @@ class TelegramNotificationTest extends TestCase
         $this->assertDatabaseCount('telegram_notifications', 0);
 
         Http::assertNotSent(fn ($request) => str_contains($request->url(), 'sendMessage'));
+    }
+
+    #[Test]
+    public function it_skips_telegram_notification_when_same_content_was_already_sent_to_chat(): void
+    {
+        config([
+            'telegram.bot_token' => 'test-bot-token',
+            'telegram.chat_ids' => ['-100123456'],
+            'telegram.chat_id' => '-100123456',
+            'telegram.base_url' => 'https://api.telegram.org',
+        ]);
+
+        Http::fake([
+            'api.telegram.org/bot*/sendMessage' => Http::response([
+                'ok' => true,
+                'result' => [
+                    'message_id' => 501,
+                    'chat' => ['id' => -100123456],
+                ],
+            ], 200),
+        ]);
+
+        [$originalMention, $project, $source, $classification] = $this->createRoutedMention();
+        $originalMention->update([
+            'content_fingerprint' => hash('sha256', 'shared duplicate content'),
+        ]);
+
+        TelegramNotification::query()->create([
+            'mention_id' => $originalMention->id,
+            'status' => TelegramNotificationStatus::Sent,
+            'message_id' => '500',
+            'chat_id' => '-100123456',
+            'sent_at' => now(),
+        ]);
+
+        $duplicateMention = Mention::query()->create([
+            'project_id' => $project->id,
+            'source_id' => $source->id,
+            'external_id' => 'mention-duplicate',
+            'content' => 'shared duplicate content',
+            'content_fingerprint' => hash('sha256', 'shared duplicate content'),
+            'url' => 'https://example.com/complaint-copy',
+            'received_at' => now(),
+            'status' => MentionStatus::Completed,
+        ]);
+
+        MentionRoute::query()->create([
+            'mention_id' => $duplicateMention->id,
+            'should_notify' => true,
+            'priority' => 'immediate',
+            'channel' => 'notification',
+            'reason' => 'Duplicate content should not notify twice.',
+        ]);
+
+        \App\Models\AiResult::query()->create([
+            'mention_id' => $duplicateMention->id,
+            'provider' => 'anthropic',
+            'model' => 'claude-test-model',
+            'summary' => $classification->summary,
+            'sentiment' => 'negative',
+            'severity' => 4,
+            'language' => 'en',
+            'category' => 'customer_service',
+            'person' => 'John Doe',
+            'confidence' => 91,
+            'reasoning' => 'Reasoning',
+            'raw_response' => ['id' => 'msg_dup'],
+            'processed_at' => now(),
+        ]);
+
+        Event::dispatch(new MentionRouted(
+            $duplicateMention->id,
+            $project->id,
+            $source->id,
+            now(),
+        ));
+
+        $this->assertDatabaseCount('telegram_notifications', 1);
+
+        Http::assertSentCount(0);
     }
 
     #[Test]

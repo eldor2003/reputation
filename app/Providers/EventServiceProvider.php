@@ -3,10 +3,12 @@
 namespace App\Providers;
 
 use App\Events\MentionApproved;
+use App\Events\MentionProcessingCompleted;
 use App\Events\MentionRouted;
 use App\Listeners\DeliverApprovedMentionListener;
 use App\Listeners\QueueRoutedMentionForDigestListener;
 use App\Listeners\SendTelegramNotificationListener;
+use App\Listeners\SendTestTelegramNotificationListener;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
 
 class EventServiceProvider extends ServiceProvider
@@ -23,6 +25,9 @@ class EventServiceProvider extends ServiceProvider
         ],
         MentionApproved::class => [
             DeliverApprovedMentionListener::class,
+        ],
+        MentionProcessingCompleted::class => [
+            SendTestTelegramNotificationListener::class,
         ],
     ];
 

@@ -107,7 +107,8 @@ class SerpApiClientTest extends TestCase
             new SerpSearchRequestDTO('coffee', SerpEngine::Yandex),
         );
 
-        Http::assertSent(fn ($request): bool => $request['engine'] === 'yandex');
+        Http::assertSent(fn ($request): bool => $request['engine'] === 'yandex'
+            && $request['text'] === 'coffee');
         $this->assertSame(SerpEngine::Yandex, $result->engine);
     }
 

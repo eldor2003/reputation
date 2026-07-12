@@ -4,55 +4,36 @@ namespace App\Services;
 
 use App\Models\AiResult;
 use App\Models\Mention;
+use App\Services\Telegram\TelegramCardMessageLayout;
 
 class TelegramNotificationMessageBuilder
 {
+    public function __construct(
+        private readonly TelegramCardMessageLayout $layout,
+    ) {}
+
     public function build(Mention $mention, AiResult $classification): string
     {
-        $url = $mention->url ?? 'N/A';
+        $mention->loadMissing(['source', 'project', 'person', 'latestThreatResult']);
 
-        return implode("\n", [
-            '————————————',
-            '',
-            '🚨 Оповещение о репутации',
-            '',
-            '👤 Персона:',
-            $classification->person ?? 'неизвестно',
-            '',
-            '📂 Категория:',
-            $classification->category ?? 'другое',
-            '',
-            '😊 Тональность:',
-            $this->translateSentiment($classification->sentiment),
-            '',
-            '⚠ Критичность:',
-            ($classification->severity ?? 0).' / 5',
-            '',
-            '🌍 Язык:',
-            $classification->language ?? 'неизвестно',
-            '',
-            '📈 Уверенность:',
-            ($classification->confidence ?? 0).'%',
-            '',
-            '📝 Краткое содержание:',
-            '',
-            $classification->summary ?? '',
-            '',
-            '🔗 URL:',
-            '',
-            $url === 'N/A' ? 'не указан' : $url,
-            '',
-            '————————————',
-        ]);
-    }
+        $threatLevel = $mention->latestThreatResult?->threat_level?->value;
+        $mentionTime = $mention->published_at ?? $mention->received_at;
+        $personName = $this->layout->resolveDisplayPerson($mention, $classification->person);
 
-    private function translateSentiment(?string $sentiment): string
-    {
-        return match ($sentiment) {
-            'negative' => 'негативная',
-            'neutral' => 'нейтральная',
-            'positive' => 'позитивная',
-            default => 'неизвестно',
-        };
+        return $this->layout->format(
+            sourceLabel: $this->layout->resolveSourceLabel($mention, $mention->source),
+            sentiment: $classification->sentiment,
+            threatLevel: $threatLevel,
+            severity: (int) ($classification->severity ?? 0),
+            person: $personName,
+            category: $classification->category,
+            language: $classification->language,
+            confidence: $classification->confidence !== null ? (int) $classification->confidence : null,
+            summary: $classification->summary,
+            url: $mention->url,
+            occurredAt: $mentionTime,
+            mentionId: $mention->id,
+            projectName: $mention->project?->name,
+        );
     }
 }

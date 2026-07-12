@@ -9,6 +9,7 @@ use App\Events\MentionApproved;
 use App\Events\MentionRejected;
 use App\Events\MentionSkipped;
 use App\Exceptions\InvalidTelegramCallbackException;
+use App\Exceptions\TelegramApiException;
 use App\Models\Mention;
 use App\Services\TelegramCallbackDataParser;
 use Illuminate\Support\Facades\Log;
@@ -45,7 +46,7 @@ class ProcessTelegramCallbackAction
         $parsed = $this->callbackDataParser->parse($callbackData);
 
         if ($this->moderationLogStorage->existsForMention($parsed->mentionId)) {
-            $this->telegramNotifier->answerCallbackQuery($callbackQueryId, 'Это упоминание уже было обработано.');
+            $this->answerCallbackSafely($callbackQueryId, 'Это упоминание уже было обработано.');
 
             return;
         }
@@ -72,7 +73,7 @@ class ProcessTelegramCallbackAction
         );
 
         $this->dispatchModerationEvent($parsed->action, $mention);
-        $this->telegramNotifier->answerCallbackQuery(
+        $this->answerCallbackSafely(
             $callbackQueryId,
             $this->confirmationText($parsed->action),
         );
@@ -115,5 +116,17 @@ class ProcessTelegramCallbackAction
             ModerationAction::Reject => 'Упоминание отклонено.',
             ModerationAction::Skip => 'Упоминание пропущено.',
         };
+    }
+
+    private function answerCallbackSafely(string $callbackQueryId, ?string $text = null): void
+    {
+        try {
+            $this->telegramNotifier->answerCallbackQuery($callbackQueryId, $text);
+        } catch (TelegramApiException $exception) {
+            Log::warning('Telegram callback acknowledgement failed.', [
+                'callback_query_id' => $callbackQueryId,
+                'exception' => $exception->getMessage(),
+            ]);
+        }
     }
 }

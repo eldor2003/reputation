@@ -125,6 +125,37 @@ class FuzzyDeduplicationEngineTest extends TestCase
     }
 
     #[Test]
+    public function it_detects_same_content_from_same_source_with_different_external_id(): void
+    {
+        $publishedAt = Carbon::parse('2026-07-09 10:30:00');
+        $content = 'RT @silupescu:Il presidente del Kazakhstan shared identical text';
+
+        $original = $this->createStoredMention(
+            source: $this->mentionlyticsSource,
+            externalId: 'ml-original',
+            content: $content,
+            title: null,
+            url: 'https://news.example.com/rt-post',
+            author: 'Reporter',
+            publishedAt: $publishedAt,
+        );
+
+        $result = $this->engine()->check($this->dto(
+            source: $this->mentionlyticsSource,
+            externalId: 'ml-duplicate',
+            content: $content,
+            title: null,
+            url: 'https://news.example.com/rt-post-copy',
+            author: 'Reporter',
+            publishedAt: $publishedAt,
+        ));
+
+        $this->assertTrue($result->isDuplicate);
+        $this->assertSame($original->id, $result->originalMentionId);
+        $this->assertSame(DeduplicationMatchMethod::Exact, $result->matchMethod);
+    }
+
+    #[Test]
     public function it_detects_same_article_from_two_providers_via_fuzzy_matching(): void
     {
         $publishedAt = Carbon::parse('2026-07-09 12:00:00');
@@ -153,7 +184,7 @@ class FuzzyDeduplicationEngineTest extends TestCase
 
         $this->assertTrue($result->isDuplicate);
         $this->assertSame($original->id, $result->originalMentionId);
-        $this->assertSame(DeduplicationMatchMethod::Fuzzy, $result->matchMethod);
+        $this->assertSame(DeduplicationMatchMethod::Exact, $result->matchMethod);
     }
 
     #[Test]

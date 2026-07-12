@@ -6,6 +6,7 @@ use App\Contracts\TelegramNotificationStorageInterface;
 use App\Contracts\TelegramNotifierInterface;
 use App\Events\MentionRouted;
 use App\DTO\TelegramReplyMarkupDTO;
+use App\Enums\TelegramNotificationStatus;
 use App\Exceptions\TelegramApiException;
 use App\Models\AiResult;
 use App\Models\Mention;
@@ -49,6 +50,10 @@ class SendTelegramNotificationListener
             return;
         }
 
+        if ($mention->is_duplicate) {
+            return;
+        }
+
         /** @var list<string> $chatIds */
         $chatIds = TelegramChatIdResolver::fromConfig();
 
@@ -73,10 +78,37 @@ class SendTelegramNotificationListener
                 continue;
             }
 
+            if ($this->contentAlreadyNotifiedInChat($mention, $chatId)) {
+                Log::info('Telegram notification skipped: duplicate content already sent to chat.', [
+                    'mention_id' => $event->mentionId,
+                    'chat_id' => $chatId,
+                ]);
+
+                continue;
+            }
+
             $notification = $this->telegramNotificationStorage->createPending($event->mentionId, $chatId);
 
             $this->sendWithRetry($notification, $chatId, $message, $keyboard, $event->mentionId);
         }
+    }
+
+    private function contentAlreadyNotifiedInChat(Mention $mention, string $chatId): bool
+    {
+        if ($mention->content_fingerprint === null) {
+            return false;
+        }
+
+        return TelegramNotification::query()
+            ->where('chat_id', $chatId)
+            ->where('status', TelegramNotificationStatus::Sent)
+            ->where('mention_id', '!=', $mention->id)
+            ->whereHas('mention', function ($query) use ($mention): void {
+                $query
+                    ->where('project_id', $mention->project_id)
+                    ->where('content_fingerprint', $mention->content_fingerprint);
+            })
+            ->exists();
     }
 
     private function sendWithRetry(
