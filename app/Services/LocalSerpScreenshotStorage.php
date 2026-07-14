@@ -11,7 +11,11 @@ class LocalSerpScreenshotStorage implements SerpScreenshotStorageInterface
     {
         $relativePath = $this->buildRelativePath($snapshotUuid, $extension);
 
-        Storage::disk($this->disk())->put($relativePath, $contents);
+        $stored = Storage::disk($this->disk())->put($relativePath, $contents);
+
+        if ($stored !== true) {
+            throw new \RuntimeException(sprintf('Failed to store SERP asset at [%s].', $relativePath));
+        }
 
         return $relativePath;
     }

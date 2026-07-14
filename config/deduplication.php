@@ -36,4 +36,6 @@ return [
 
     'time_window_hours' => (int) env('DEDUP_TIME_WINDOW_HOURS', 72),
 
+    'candidate_limit' => (int) env('DEDUP_CANDIDATE_LIMIT', 500),
+
 ];

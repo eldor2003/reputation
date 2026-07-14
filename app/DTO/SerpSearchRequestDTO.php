@@ -12,6 +12,8 @@ readonly class SerpSearchRequestDTO
         public ?string $location = null,
         public ?string $language = null,
         public ?int $num = null,
+        public ?bool $requestScreenshot = null,
+        public ?bool $requestRawHtml = null,
     ) {}
 
     /**
@@ -35,6 +37,14 @@ readonly class SerpSearchRequestDTO
 
         if ($this->num !== null) {
             $parameters['num'] = $this->num;
+        }
+
+        if ($this->requestScreenshot ?? (bool) config('serpapi.screenshots.request_screenshot', true)) {
+            $parameters['screenshot'] = 'true';
+        }
+
+        if ($this->requestRawHtml ?? (bool) config('serpapi.screenshots.request_raw_html', true)) {
+            $parameters['raw_html'] = 'true';
         }
 
         return $parameters;

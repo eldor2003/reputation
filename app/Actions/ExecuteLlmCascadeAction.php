@@ -8,6 +8,7 @@ use App\Contracts\PromptInjectionGuardInterface;
 use App\DTO\LlmCascadeExecutionResultDTO;
 use App\DTO\LlmCascadeResultDTO;
 use App\DTO\NormalizedMentionDTO;
+use App\DTO\PersonMatchResultDTO;
 use App\Services\Classification\CascadeTierEscalator;
 use Illuminate\Support\Facades\Config;
 
@@ -24,9 +25,10 @@ class ExecuteLlmCascadeAction
         int $mentionId,
         NormalizedMentionDTO $mention,
         ?string $forcedMinimumTier = null,
+        ?PersonMatchResultDTO $personMatch = null,
     ): LlmCascadeExecutionResultDTO {
         $guardResult = $this->promptInjectionGuard->scan($mention);
-        $prompt = $this->promptBuilder->build($mention, $guardResult);
+        $prompt = $this->promptBuilder->build($mention, $guardResult, $personMatch);
 
         $cascadeResult = $forcedMinimumTier !== null
             ? $this->classifyWithForcedTier($prompt, $mention, $mentionId, $forcedMinimumTier)

@@ -26,6 +26,7 @@ return [
         'output_tag' => env('CLASSIFICATION_PROMPT_OUTPUT_TAG', 'output_format'),
         'security_tag' => env('CLASSIFICATION_PROMPT_SECURITY_TAG', 'security_notice'),
         'mention_tag' => env('CLASSIFICATION_PROMPT_MENTION_TAG', 'mention_data'),
+        'person_tag' => env('CLASSIFICATION_PROMPT_PERSON_TAG', 'person_candidates'),
     ],
 
     'injection_guard' => [

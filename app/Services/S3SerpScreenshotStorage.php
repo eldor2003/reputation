@@ -11,14 +11,22 @@ class S3SerpScreenshotStorage implements SerpScreenshotStorageInterface
     {
         $relativePath = $this->buildRelativePath($snapshotUuid, $extension);
 
-        Storage::disk($this->disk())->put($relativePath, $contents);
+        $stored = Storage::disk($this->disk())->put($relativePath, $contents);
+
+        if ($stored !== true) {
+            throw new \RuntimeException(sprintf('Failed to store SERP asset at [%s].', $relativePath));
+        }
 
         return $relativePath;
     }
 
     public function exists(string $relativePath): bool
     {
-        return Storage::disk($this->disk())->exists($relativePath);
+        try {
+            return Storage::disk($this->disk())->exists($relativePath);
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     public function delete(string $relativePath): bool
@@ -35,6 +43,6 @@ class S3SerpScreenshotStorage implements SerpScreenshotStorageInterface
 
     private function disk(): string
     {
-        return 's3';
+        return (string) config('serpapi.screenshots.disk', 's3');
     }
 }

@@ -11,6 +11,8 @@ use App\DTO\SerpSearchResultDTO;
 use App\DTO\SerpSnapshotDTO;
 use App\Models\SerpSnapshot;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class SerpSnapshotService
 {
@@ -29,7 +31,12 @@ class SerpSnapshotService
         $screenshotPath = $this->captureAndStoreScreenshot($snapshot, $searchResult);
 
         if ($screenshotPath !== null) {
-            $snapshot->update(['screenshot_path' => $screenshotPath]);
+            $snapshot->update([
+                'screenshot_path' => $screenshotPath,
+                'metadata' => array_merge($snapshot->metadata ?? [], [
+                    'screenshot_available' => true,
+                ]),
+            ]);
             $snapshot->refresh();
         }
 
@@ -38,19 +45,72 @@ class SerpSnapshotService
 
     private function captureAndStoreScreenshot(SerpSnapshot $snapshot, SerpSearchResultDTO $searchResult): ?string
     {
-        $captureUrl = $searchResult->screenshotUrl ?? $searchResult->rawHtmlUrl;
+        if (is_string($searchResult->screenshotUrl) && $searchResult->screenshotUrl !== '') {
+            $contents = $this->screenshotCapture->capture($searchResult->screenshotUrl);
 
-        if (! is_string($captureUrl) || $captureUrl === '') {
-            return null;
+        if ($contents !== null) {
+            try {
+                return $this->screenshotStorage->store($snapshot->uuid, $contents, 'png');
+            } catch (\Throwable $exception) {
+                Log::warning('SERP screenshot storage failed.', [
+                    'snapshot_uuid' => $snapshot->uuid,
+                    'exception' => $exception->getMessage(),
+                ]);
+            }
+        }
         }
 
-        $contents = $this->screenshotCapture->capture($captureUrl);
+        $this->storeHtmlArchiveIfAvailable($snapshot, $searchResult);
 
-        if ($contents === null) {
-            return null;
+        return null;
+    }
+
+    private function storeHtmlArchiveIfAvailable(SerpSnapshot $snapshot, SerpSearchResultDTO $searchResult): void
+    {
+        if (! is_string($searchResult->rawHtmlUrl) || $searchResult->rawHtmlUrl === '') {
+            return;
         }
 
-        return $this->screenshotStorage->store($snapshot->uuid, $contents);
+        try {
+            $response = Http::timeout((int) config('serpapi.screenshots.timeout', 30))
+                ->accept('*/*')
+                ->get($searchResult->rawHtmlUrl);
+        } catch (\Throwable $exception) {
+            Log::warning('SERP HTML archive fetch failed.', [
+                'snapshot_uuid' => $snapshot->uuid,
+                'url' => $searchResult->rawHtmlUrl,
+                'exception' => $exception->getMessage(),
+            ]);
+
+            return;
+        }
+
+        if (! $response->successful()) {
+            return;
+        }
+
+        try {
+            $archivePath = $this->screenshotStorage->store($snapshot->uuid, $response->body(), 'html');
+
+            $snapshot->update([
+                'metadata' => array_merge($snapshot->metadata ?? [], [
+                    'screenshot_available' => false,
+                    'archive_path' => $archivePath,
+                ]),
+            ]);
+        } catch (\Throwable $exception) {
+            Log::warning('SERP HTML archive storage failed.', [
+                'snapshot_uuid' => $snapshot->uuid,
+                'exception' => $exception->getMessage(),
+            ]);
+
+            $snapshot->update([
+                'metadata' => array_merge($snapshot->metadata ?? [], [
+                    'screenshot_available' => false,
+                    'archive_storage_failed' => true,
+                ]),
+            ]);
+        }
     }
 
     private function toSnapshotDto(
@@ -68,8 +128,12 @@ class SerpSnapshotService
             screenshotPath: null,
             metadata: array_filter([
                 'raw_html_url' => $searchResult->rawHtmlUrl,
+                'screenshot_url' => $searchResult->screenshotUrl,
                 'person_id' => $personId,
-            ]),
+                'screenshot_available' => is_string($searchResult->screenshotUrl) && $searchResult->screenshotUrl !== ''
+                    ? null
+                    : false,
+            ], fn (mixed $value): bool => $value !== null),
         );
     }
 }

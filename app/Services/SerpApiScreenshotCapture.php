@@ -37,41 +37,6 @@ class SerpApiScreenshotCapture implements SerpScreenshotCaptureInterface
             return $response->body();
         }
 
-        return $this->renderPreviewPng($response->body(), $url);
-    }
-
-    private function renderPreviewPng(string $html, string $sourceUrl): ?string
-    {
-        if (! extension_loaded('gd')) {
-            return null;
-        }
-
-        $width = 800;
-        $height = 200;
-        $image = imagecreatetruecolor($width, $height);
-
-        if ($image === false) {
-            return null;
-        }
-
-        $background = imagecolorallocate($image, 245, 245, 245);
-        $textColor = imagecolorallocate($image, 30, 30, 30);
-        imagefilledrectangle($image, 0, 0, $width, $height, $background);
-
-        $label = 'SERP snapshot archive';
-        $hash = substr(hash('sha256', $html), 0, 16);
-        $source = mb_substr($sourceUrl, 0, 90);
-
-        imagestring($image, 3, 10, 20, $label, $textColor);
-        imagestring($image, 2, 10, 50, 'Source: '.$source, $textColor);
-        imagestring($image, 2, 10, 80, 'Content hash: '.$hash, $textColor);
-        imagestring($image, 2, 10, 110, 'Bytes: '.strlen($html), $textColor);
-
-        ob_start();
-        imagepng($image);
-        $png = ob_get_clean() ?: null;
-        imagedestroy($image);
-
-        return is_string($png) && $png !== '' ? $png : null;
+        return null;
     }
 }

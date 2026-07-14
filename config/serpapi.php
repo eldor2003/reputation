@@ -22,6 +22,8 @@ return [
         'disk' => env('SERP_SCREENSHOT_DISK', 'local'),
         'path' => env('SERP_SCREENSHOT_PATH', 'serp-screenshots'),
         'timeout' => (int) env('SERP_SCREENSHOT_TIMEOUT', 30),
+        'request_screenshot' => (bool) env('SERP_SCREENSHOT_REQUEST', true),
+        'request_raw_html' => (bool) env('SERP_RAW_HTML_REQUEST', true),
     ],
 
     'snapshots' => [

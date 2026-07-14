@@ -59,7 +59,7 @@ class ProcessMentionAction
                 now(),
             );
 
-            $this->resolveMentionPersonAction->execute($mention->id, $normalized);
+            $personMatch = $this->resolveMentionPersonAction->execute($mention->id, $normalized);
 
             $dedupResult = $this->deduplicateMentionAction->execute($mention->id, $normalized);
 
@@ -78,8 +78,17 @@ class ProcessMentionAction
 
             $this->persistOriginal($mention, $normalized, $dedupResult);
 
-            $cascadeExecution = $this->executeLlmCascadeAction->execute($mention->id, $normalized);
-            $this->validateStructuredClassificationAction->execute($mention->id, $normalized, $cascadeExecution);
+            $cascadeExecution = $this->executeLlmCascadeAction->execute(
+                $mention->id,
+                $normalized,
+                personMatch: $personMatch,
+            );
+            $this->validateStructuredClassificationAction->execute(
+                $mention->id,
+                $normalized,
+                $cascadeExecution,
+                $personMatch,
+            );
 
             $this->evaluateMentionThreatAction->execute($mention->id);
 

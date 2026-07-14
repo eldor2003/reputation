@@ -4,9 +4,11 @@ namespace App\Actions;
 
 use App\Contracts\AiResultStorageInterface;
 use App\Contracts\ClaudeStructuredOutputInterface;
+use App\DTO\ClassificationResultDTO;
 use App\DTO\LlmCascadeExecutionResultDTO;
 use App\DTO\LlmCascadeResultDTO;
 use App\DTO\NormalizedMentionDTO;
+use App\DTO\PersonMatchResultDTO;
 use App\DTO\StructuredClassificationResultDTO;
 use App\DTO\ValidationMetadataDTO;
 use App\Enums\ClassificationValidationStatus;
@@ -28,13 +30,17 @@ class ValidateStructuredClassificationAction
         int $mentionId,
         NormalizedMentionDTO $mention,
         LlmCascadeExecutionResultDTO $execution,
+        ?PersonMatchResultDTO $personMatch = null,
     ): StructuredClassificationResultDTO {
         $validationRetryCount = 0;
         $validationStatus = ClassificationValidationStatus::Valid;
         $currentExecution = $execution;
 
         try {
-            $structured = $this->validateCascadeResult($currentExecution->cascadeResult);
+            $structured = $this->applyResolvedPerson(
+                $this->validateCascadeResult($currentExecution->cascadeResult),
+                $personMatch,
+            );
         } catch (SchemaValidationException $firstFailure) {
             Log::warning('Structured classification validation failed, retrying once.', [
                 'mention_id' => $mentionId,
@@ -43,10 +49,17 @@ class ValidateStructuredClassificationAction
 
             $validationRetryCount = 1;
             $validationStatus = ClassificationValidationStatus::Retry;
-            $currentExecution = $this->executeLlmCascadeAction->execute($mentionId, $mention);
+            $currentExecution = $this->executeLlmCascadeAction->execute(
+                $mentionId,
+                $mention,
+                personMatch: $personMatch,
+            );
 
             try {
-                $structured = $this->validateCascadeResult($currentExecution->cascadeResult);
+                $structured = $this->applyResolvedPerson(
+                    $this->validateCascadeResult($currentExecution->cascadeResult),
+                    $personMatch,
+                );
             } catch (SchemaValidationException $secondFailure) {
                 if (! (bool) config('classification.validation.escalate_on_failure', true)) {
                     throw $secondFailure;
@@ -66,9 +79,13 @@ class ValidateStructuredClassificationAction
                     $mentionId,
                     $mention,
                     $escalatedTier,
+                    $personMatch,
                 );
 
-                $structured = $this->validateCascadeResult($currentExecution->cascadeResult);
+                $structured = $this->applyResolvedPerson(
+                    $this->validateCascadeResult($currentExecution->cascadeResult),
+                    $personMatch,
+                );
             }
         }
 
@@ -106,5 +123,39 @@ class ValidateStructuredClassificationAction
     private function validateCascadeResult(LlmCascadeResultDTO $cascadeResult): StructuredClassificationResultDTO
     {
         return $this->structuredOutput->parse($cascadeResult->classification->rawResponse);
+    }
+
+    private function applyResolvedPerson(
+        StructuredClassificationResultDTO $structured,
+        ?PersonMatchResultDTO $personMatch,
+    ): StructuredClassificationResultDTO {
+        if ($personMatch === null || $personMatch->isAmbiguous || $personMatch->resolvedPerson === null) {
+            return $structured;
+        }
+
+        $classification = $structured->classification;
+        $resolvedName = $personMatch->resolvedPerson->fullName;
+
+        if ($classification->person === $resolvedName) {
+            return $structured;
+        }
+
+        return new StructuredClassificationResultDTO(
+            classification: new ClassificationResultDTO(
+                summary: $classification->summary,
+                sentiment: $classification->sentiment,
+                severity: $classification->severity,
+                language: $classification->language,
+                category: $classification->category,
+                person: $resolvedName,
+                confidence: $classification->confidence,
+                reasoning: $classification->reasoning,
+                rawResponse: array_merge($classification->rawResponse, ['person' => $resolvedName]),
+            ),
+            validationStatus: $structured->validationStatus,
+            validationRetryCount: $structured->validationRetryCount,
+            injectionDetected: $structured->injectionDetected,
+            guardReason: $structured->guardReason,
+        );
     }
 }

@@ -26,6 +26,8 @@ class SerpSearchRequestDTOTest extends TestCase
             'location' => 'United States',
             'hl' => 'en',
             'num' => 10,
+            'screenshot' => 'true',
+            'raw_html' => 'true',
         ], $request->toQueryParameters());
     }
 }

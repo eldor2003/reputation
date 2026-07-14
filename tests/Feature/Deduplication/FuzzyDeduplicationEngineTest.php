@@ -219,6 +219,49 @@ class FuzzyDeduplicationEngineTest extends TestCase
     }
 
     #[Test]
+    public function it_detects_rewritten_cross_provider_article_when_simhash_differs(): void
+    {
+        $publishedAt = Carbon::parse('2026-07-09 13:00:00');
+        $url = 'https://news.example.com/product-recall';
+        $originalContent = 'Company X issued a product recall for batch 2026-A due to safety concerns.';
+        $rewrittenContent = 'Company X issued a product recall for batch 2026-A because of safety concerns.';
+
+        $simHashGenerator = $this->app->make(\App\Services\Deduplication\SimHashGenerator::class);
+        $originalSimhash = $simHashGenerator->generate($originalContent);
+        $rewrittenSimhash = $simHashGenerator->generate($rewrittenContent);
+
+        $this->assertNotSame($originalSimhash, $rewrittenSimhash);
+        $this->assertLessThanOrEqual(
+            (int) config('deduplication.simhash.max_hamming_distance', 8),
+            $simHashGenerator->hammingDistance($originalSimhash, $rewrittenSimhash),
+        );
+
+        $original = $this->createStoredMention(
+            source: $this->brand24Source,
+            externalId: 'brand24-rewrite-1',
+            content: $originalContent,
+            title: 'Product recall announced',
+            url: $url,
+            author: 'News Desk',
+            publishedAt: $publishedAt,
+        );
+
+        $result = $this->engine()->check($this->dto(
+            source: $this->mentionlyticsSource,
+            externalId: 'ml-rewrite-1',
+            content: $rewrittenContent,
+            title: 'Product recall announced',
+            url: $url,
+            author: 'News Desk',
+            publishedAt: $publishedAt->copy()->addHour(),
+        ));
+
+        $this->assertTrue($result->isDuplicate);
+        $this->assertSame($original->id, $result->originalMentionId);
+        $this->assertSame(DeduplicationMatchMethod::Fuzzy, $result->matchMethod);
+    }
+
+    #[Test]
     public function it_does_not_match_a_different_article(): void
     {
         $publishedAt = Carbon::parse('2026-07-09 14:00:00');

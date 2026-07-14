@@ -38,4 +38,43 @@ class MentionPromptBuilderTest extends TestCase
         $this->assertStringContainsString('text: Sample mention text.', $prompt);
         $this->assertStringContainsString(MentionClassificationPrompt::securityNotice(), $prompt);
     }
+
+    #[Test]
+    public function it_includes_dictionary_person_candidates_in_prompt(): void
+    {
+        $builder = new MentionPromptBuilder;
+
+        $prompt = $builder->build(
+            new NormalizedMentionDTO(
+                projectId: 1,
+                sourceId: 2,
+                externalId: 'mention-456',
+                author: null,
+                authorId: null,
+                language: 'en',
+                text: 'John Smith criticized the company.',
+                title: null,
+                url: null,
+                publishedAt: Carbon::parse('2026-06-29T10:00:00Z'),
+                receivedAt: Carbon::parse('2026-06-29T11:00:00Z'),
+            ),
+            personMatch: new \App\DTO\PersonMatchResultDTO(
+                resolvedPerson: new \App\DTO\ResolvedPersonDTO(
+                    personId: 7,
+                    personUuid: 'person-uuid',
+                    fullName: 'John Smith',
+                    matchedAlias: 'John Smith',
+                    matchType: \App\Enums\PersonAliasType::FullName,
+                    confidence: 0.95,
+                    matchedIn: 'text',
+                ),
+                isAmbiguous: false,
+                candidates: [],
+            ),
+        );
+
+        $this->assertStringContainsString('<person_candidates>', $prompt);
+        $this->assertStringContainsString('resolved_person: John Smith', $prompt);
+        $this->assertStringContainsString('ambiguous: no', $prompt);
+    }
 }

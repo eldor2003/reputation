@@ -132,17 +132,15 @@ class FuzzyDeduplicationEngine implements DeduplicationEngineInterface
     private function findCandidateMentions(NormalizedMentionDTO $mention, MentionFingerprintDTO $fingerprint)
     {
         $windowHours = (int) config('deduplication.time_window_hours', 72);
+        $maxCandidates = (int) config('deduplication.candidate_limit', 500);
         $publishedAt = $mention->publishedAt;
 
         $query = Mention::query()
             ->where('project_id', $mention->projectId)
             ->where('is_duplicate', false)
-            ->where(function ($builder) use ($fingerprint): void {
-                $builder->where('content_fingerprint', $fingerprint->contentFingerprint);
-
-                if ($fingerprint->simhash !== '') {
-                    $builder->orWhere('simhash', $fingerprint->simhash);
-                }
+            ->where(function ($builder): void {
+                $builder->whereNotNull('simhash')
+                    ->orWhereNotNull('content_fingerprint');
             });
 
         if ($publishedAt !== null) {
@@ -150,16 +148,25 @@ class FuzzyDeduplicationEngine implements DeduplicationEngineInterface
                 $publishedAt->copy()->subHours($windowHours),
                 $publishedAt->copy()->addHours($windowHours),
             ]);
+        } else {
+            $query->where('received_at', '>=', now()->subHours($windowHours));
         }
 
-        return $query->get()->filter(function (Mention $candidate) use ($fingerprint): bool {
-            if ($candidate->simhash === null) {
-                return $candidate->content_fingerprint === $fingerprint->contentFingerprint;
-            }
+        return $query
+            ->latest('published_at')
+            ->limit($maxCandidates)
+            ->get()
+            ->filter(function (Mention $candidate) use ($fingerprint): bool {
+                if ($candidate->content_fingerprint === $fingerprint->contentFingerprint) {
+                    return true;
+                }
 
-            return $this->matchingStrategy->signaturesAreSimilar($candidate->simhash, $fingerprint->simhash)
-                || $candidate->content_fingerprint === $fingerprint->contentFingerprint;
-        });
+                if ($candidate->simhash === null || $fingerprint->simhash === '') {
+                    return false;
+                }
+
+                return $this->matchingStrategy->signaturesAreSimilar($candidate->simhash, $fingerprint->simhash);
+            });
     }
 
     private function toNormalizedMentionDto(Mention $mention): NormalizedMentionDTO

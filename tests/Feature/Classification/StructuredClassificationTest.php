@@ -118,11 +118,11 @@ class StructuredClassificationTest extends TestCase
         $executeLlmCascadeAction = Mockery::mock(ExecuteLlmCascadeAction::class);
         $executeLlmCascadeAction->shouldReceive('execute')
             ->once()
-            ->with($mention->id, $mentionDto)
+            ->with($mention->id, $mentionDto, null, null)
             ->andReturn($invalidExecution);
         $executeLlmCascadeAction->shouldReceive('execute')
             ->once()
-            ->with($mention->id, $mentionDto, Mockery::type('string'))
+            ->with($mention->id, $mentionDto, Mockery::type('string'), null)
             ->andReturn($validExecution);
 
         $action = new ValidateStructuredClassificationAction(

@@ -40,6 +40,7 @@ class TakeSerpSnapshotActionTest extends TestCase
                     new SerpPositionDTO(2, 'Title 2', 'https://example.com/2', null),
                 ],
                 rawHtmlUrl: 'https://serpapi.com/raw.html',
+                screenshotUrl: 'https://serpapi.com/screenshot.png',
             ));
 
         $this->app->instance(SerpApiClientInterface::class, $client);

@@ -26,12 +26,8 @@ class SerpApiScreenshotCaptureTest extends TestCase
     }
 
     #[Test]
-    public function it_generates_a_png_preview_when_capture_url_returns_html(): void
+    public function it_returns_null_when_capture_url_returns_html(): void
     {
-        if (! extension_loaded('gd')) {
-            $this->markTestSkipped('GD extension is required for HTML preview screenshots.');
-        }
-
         Http::fake([
             'https://serpapi.com/raw.html' => Http::response('<html><body>SERP</body></html>', 200, [
                 'Content-Type' => 'text/html',
@@ -41,8 +37,7 @@ class SerpApiScreenshotCaptureTest extends TestCase
         $capture = $this->app->make(SerpApiScreenshotCapture::class);
         $bytes = $capture->capture('https://serpapi.com/raw.html');
 
-        $this->assertIsString($bytes);
-        $this->assertStringStartsWith("\x89PNG\r\n\x1a\n", (string) $bytes);
+        $this->assertNull($bytes);
     }
 
     #[Test]
